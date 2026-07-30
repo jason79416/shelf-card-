@@ -127,40 +127,44 @@ if uploaded_file is not None:
         else:
             with st.spinner("Analyzing image and creating copy..."):
                 try:
-                    genai.configure(api_key=api_key)
+                    cleaned_key = api_key.strip()
+                    genai.configure(api_key=cleaned_key)
                     
-                    # Dynamically list models accessible by this specific API key
-                    available_models = [
-                        m.name for m in genai.list_models()
-                        if 'generateContent' in m.supported_generation_methods
-                    ]
+                    # Candidate active models
+                    candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
+                    response = None
+                    last_error = None
                     
-                    if not available_models:
-                        st.error("No models supporting content generation were found for this API key. Please check your API key permissions in Google AI Studio.")
+                    prompt = """
+                    Analyze this product image and return ONLY a valid JSON object without markdown code blocks:
+                    {
+                        "product_name_en": "Product Name in English",
+                        "product_name_mn": "Product Name in Mongolian Cyrillic",
+                        "category_en": "Category in English",
+                        "category_mn": "Category in Mongolian",
+                        "headline_en": "Headline in English",
+                        "headline_mn": "Headline in Mongolian",
+                        "usage_en": "1-2 sentences on what it is and usage in English",
+                        "usage_mn": "1-2 sentences on what it is and usage in natural Mongolian",
+                        "why_buy_en": "Persuasive hook in English",
+                        "why_buy_mn": "Persuasive hook in Mongolian"
+                    }
+                    """
+                    
+                    for m_name in candidate_models:
+                        try:
+                            model = genai.GenerativeModel(m_name)
+                            res = model.generate_content([prompt, image])
+                            if res and res.text:
+                                response = res
+                                break
+                        except Exception as ex:
+                            last_error = ex
+                            continue
+                    
+                    if not response:
+                        st.error(f"API Error: Could not generate content using active models. Details: {str(last_error)}")
                     else:
-                        # Select a flash model if available, otherwise use the first supported model
-                        target_model = next((m for m in available_models if 'flash' in m.lower()), available_models[0])
-                        
-                        model = genai.GenerativeModel(target_model)
-                        
-                        prompt = """
-                        Analyze this product image and return ONLY a valid JSON object:
-                        {
-                            "product_name_en": "Product Name in English",
-                            "product_name_mn": "Product Name in Mongolian Cyrillic",
-                            "category_en": "Category in English",
-                            "category_mn": "Category in Mongolian",
-                            "headline_en": "Headline in English",
-                            "headline_mn": "Headline in Mongolian",
-                            "usage_en": "1-2 sentences on what it is and usage in English",
-                            "usage_mn": "1-2 sentences on what it is and usage in natural Mongolian",
-                            "why_buy_en": "Persuasive hook in English",
-                            "why_buy_mn": "Persuasive hook in Mongolian"
-                        }
-                        """
-                        
-                        response = model.generate_content([prompt, image])
-
                         text_resp = response.text.replace("```json", "").replace("```", "").strip()
                         data = json.loads(text_resp)
 
