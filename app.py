@@ -128,7 +128,13 @@ if uploaded_file is not None:
             with st.spinner("Analyzing image and creating copy..."):
                 try:
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # Candidate models list for automatic compatibility check
+                    model_names = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.5-pro']
+                    model = None
+                    response = None
+                    last_exception = None
+                    
                     prompt = """
                     Analyze this product image and return ONLY a valid JSON object:
                     {
@@ -144,7 +150,20 @@ if uploaded_file is not None:
                         "why_buy_mn": "Persuasive hook in Mongolian"
                     }
                     """
-                    response = model.generate_content([prompt, image])
+                    
+                    for m_name in model_names:
+                        try:
+                            m = genai.GenerativeModel(m_name)
+                            response = m.generate_content([prompt, image])
+                            if response and response.text:
+                                break
+                        except Exception as ex:
+                            last_exception = ex
+                            continue
+                    
+                    if not response:
+                        raise last_exception if last_exception else Exception("Could not find a supported Gemini model for this API key.")
+
                     text_resp = response.text.replace("```json", "").replace("```", "").strip()
                     data = json.loads(text_resp)
 
