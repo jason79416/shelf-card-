@@ -129,63 +129,60 @@ if uploaded_file is not None:
                 try:
                     genai.configure(api_key=api_key)
                     
-                    # Candidate models list for automatic compatibility check
-                    model_names = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.5-pro']
-                    model = None
-                    response = None
-                    last_exception = None
+                    # Dynamically list models accessible by this specific API key
+                    available_models = [
+                        m.name for m in genai.list_models()
+                        if 'generateContent' in m.supported_generation_methods
+                    ]
                     
-                    prompt = """
-                    Analyze this product image and return ONLY a valid JSON object:
-                    {
-                        "product_name_en": "Product Name in English",
-                        "product_name_mn": "Product Name in Mongolian Cyrillic",
-                        "category_en": "Category in English",
-                        "category_mn": "Category in Mongolian",
-                        "headline_en": "Headline in English",
-                        "headline_mn": "Headline in Mongolian",
-                        "usage_en": "1-2 sentences on what it is and usage in English",
-                        "usage_mn": "1-2 sentences on what it is and usage in natural Mongolian",
-                        "why_buy_en": "Persuasive hook in English",
-                        "why_buy_mn": "Persuasive hook in Mongolian"
-                    }
-                    """
-                    
-                    for m_name in model_names:
-                        try:
-                            m = genai.GenerativeModel(m_name)
-                            response = m.generate_content([prompt, image])
-                            if response and response.text:
-                                break
-                        except Exception as ex:
-                            last_exception = ex
-                            continue
-                    
-                    if not response:
-                        raise last_exception if last_exception else Exception("Could not find a supported Gemini model for this API key.")
+                    if not available_models:
+                        st.error("No models supporting content generation were found for this API key. Please check your API key permissions in Google AI Studio.")
+                    else:
+                        # Select a flash model if available, otherwise use the first supported model
+                        target_model = next((m for m in available_models if 'flash' in m.lower()), available_models[0])
+                        
+                        model = genai.GenerativeModel(target_model)
+                        
+                        prompt = """
+                        Analyze this product image and return ONLY a valid JSON object:
+                        {
+                            "product_name_en": "Product Name in English",
+                            "product_name_mn": "Product Name in Mongolian Cyrillic",
+                            "category_en": "Category in English",
+                            "category_mn": "Category in Mongolian",
+                            "headline_en": "Headline in English",
+                            "headline_mn": "Headline in Mongolian",
+                            "usage_en": "1-2 sentences on what it is and usage in English",
+                            "usage_mn": "1-2 sentences on what it is and usage in natural Mongolian",
+                            "why_buy_en": "Persuasive hook in English",
+                            "why_buy_mn": "Persuasive hook in Mongolian"
+                        }
+                        """
+                        
+                        response = model.generate_content([prompt, image])
 
-                    text_resp = response.text.replace("```json", "").replace("```", "").strip()
-                    data = json.loads(text_resp)
+                        text_resp = response.text.replace("```json", "").replace("```", "").strip()
+                        data = json.loads(text_resp)
 
-                    st.success("Card Generated!")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**[ English ]**")
-                        st.write(f"**Name:** {data.get('product_name_en')}")
-                        st.write(f"**Usage:** {data.get('usage_en')}")
-                        st.write(f"**Why Buy:** {data.get('why_buy_en')}")
-                    with col2:
-                        st.markdown("**[ Монгол ]**")
-                        st.write(f"**Нэр:** {data.get('product_name_mn')}")
-                        st.write(f"**Хэрэглээ:** {data.get('usage_mn')}")
-                        st.write(f"**Яагаад авах вэ:** {data.get('why_buy_mn')}")
+                        st.success("Card Generated!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**[ English ]**")
+                            st.write(f"**Name:** {data.get('product_name_en')}")
+                            st.write(f"**Usage:** {data.get('usage_en')}")
+                            st.write(f"**Why Buy:** {data.get('why_buy_en')}")
+                        with col2:
+                            st.markdown("**[ Монгол ]**")
+                            st.write(f"**Нэр:** {data.get('product_name_mn')}")
+                            st.write(f"**Хэрэглээ:** {data.get('usage_mn')}")
+                            st.write(f"**Яагаад авах вэ:** {data.get('why_buy_mn')}")
 
-                    pdf_buffer = generate_pdf_shelf_card(data)
-                    st.download_button(
-                        label="📥 Download Printable PDF Shelf Card (4x6)",
-                        data=pdf_buffer,
-                        file_name=f"{data.get('product_name_en', 'product').replace(' ', '_')}_Shelf_Card.pdf",
-                        mime="application/pdf"
-                    )
+                        pdf_buffer = generate_pdf_shelf_card(data)
+                        st.download_button(
+                            label="📥 Download Printable PDF Shelf Card (4x6)",
+                            data=pdf_buffer,
+                            file_name=f"{data.get('product_name_en', 'product').replace(' ', '_')}_Shelf_Card.pdf",
+                            mime="application/pdf"
+                        )
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
