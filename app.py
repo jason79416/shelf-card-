@@ -3,7 +3,16 @@ import os
 import json
 import streamlit as st
 from PIL import Image
-import google.generativeai as genai
+
+# Import Google GenAI SDK (New SDK) & Legacy SDK
+try:
+    from google import genai
+    USE_NEW_SDK = True
+except ImportError:
+    USE_NEW_SDK = False
+
+import google.generativeai as genai_legacy
+
 from reportlab.lib.pagesizes import inch
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -11,14 +20,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Page Setup
-st.set_page_config(
-    page_title="Mongolian Import Store - Shelf Card Generator",
-    page_icon="🏷️",
-    layout="centered"
-)
+st.set_page_config(page_title="Mongolian Import Store - Shelf Card Generator", page_icon="🏷️", layout="centered")
 
-# Load Cyrillic Fonts for Mongolian Support
+# Font loading logic
 def load_cyrillic_fonts():
     possible_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -110,7 +114,6 @@ def generate_pdf_shelf_card(data):
     buffer.seek(0)
     return buffer
 
-# UI Layout
 st.title("🏷️ Import Product Shelf Card Generator")
 st.sidebar.title("⚙️ Settings")
 api_key = st.sidebar.text_input("Gemini API Key", type="password")
@@ -128,15 +131,8 @@ if uploaded_file is not None:
             with st.spinner("Analyzing image and creating copy..."):
                 try:
                     cleaned_key = api_key.strip()
-                    genai.configure(api_key=cleaned_key)
-                    
-                    # Candidate active models
-                    candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
-                    response = None
-                    last_error = None
-                    
                     prompt = """
-                    Analyze this product image and return ONLY a valid JSON object without markdown code blocks:
+                    Analyze this product image and return ONLY a valid JSON object without markdown formatting:
                     {
                         "product_name_en": "Product Name in English",
                         "product_name_mn": "Product Name in Mongolian Cyrillic",
@@ -151,24 +147,44 @@ if uploaded_file is not None:
                     }
                     """
                     
-                    for m_name in candidate_models:
-                        try:
-                            model = genai.GenerativeModel(m_name)
-                            res = model.generate_content([prompt, image])
-                            if res and res.text:
-                                response = res
-                                break
-                        except Exception as ex:
-                            last_error = ex
-                            continue
+                    text_resp = None
+                    last_error = None
                     
-                    if not response:
-                        st.error(f"API Error: Could not generate content using active models. Details: {str(last_error)}")
-                    else:
-                        text_resp = response.text.replace("```json", "").replace("```", "").strip()
-                        data = json.loads(text_resp)
+                    # Try using new google-genai SDK first
+                    if USE_NEW_SDK:
+                        try:
+                            client = genai.Client(api_key=cleaned_key)
+                            for m in ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']:
+                                try:
+                                    res = client.models.generate_content(model=m, contents=[prompt, image])
+                                    if res and res.text:
+                                        text_resp = res.text
+                                        break
+                                except Exception as e:
+                                    last_error = e
+                        except Exception as e:
+                            last_error = e
 
-                        st.success("Card Generated!")
+                    # Fallback to google-generativeai SDK if new SDK fails or isn't installed
+                    if not text_resp:
+                        genai_legacy.configure(api_key=cleaned_key)
+                        for m in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']:
+                            try:
+                                model = genai_legacy.GenerativeModel(m)
+                                res = model.generate_content([prompt, image])
+                                if res and res.text:
+                                    text_resp = res.text
+                                    break
+                            except Exception as e:
+                                last_error = e
+
+                    if not text_resp:
+                        st.error(f"API Error: Unable to query Gemini models ({str(last_error)}). Please verify that your API Key is created from Google AI Studio (https://aistudio.google.com/app/apikey).")
+                    else:
+                        clean_json = text_resp.replace("```json", "").replace("```", "").strip()
+                        data = json.loads(clean_json)
+
+                        st.success("Card Generated Successfully!")
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown("**[ English ]**")
@@ -189,4 +205,4 @@ if uploaded_file is not None:
                             mime="application/pdf"
                         )
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"Error processing image or JSON: {str(e)}")
