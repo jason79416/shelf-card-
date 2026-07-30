@@ -6,9 +6,9 @@
 ```toml
 GEMINI_API_KEY = "paste-your-key-here"
 # Optional: choose a model available to your API key.
-# GEMINI_MODEL = "gemini-2.5-flash"
+# GEMINI_MODEL = "gemini-3.6-flash"
 ```
 
 3. Commit this folder to GitHub and deploy it with Streamlit Community Cloud.
 
-The application deliberately uses `google-genai`, Google's current Python SDK. It requests JSON-structured text from a current stable model and tries two compatible fallbacks only if Google reports that the configured model is unavailable. Do not add your API key to `app.py` or commit it to GitHub.
+The application deliberately uses `google-genai`, Google's current Python SDK. It requests JSON-structured text and asks Google which models are available to your specific API key before choosing a compatible Flash model. Do not add your API key to `app.py` or commit it to GitHub.

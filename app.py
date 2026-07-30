@@ -110,14 +110,45 @@ FONTS_READY = load_cyrillic_fonts()
 
 def resolve_model_name() -> str:
     """Permit a model override without putting it in source control."""
-    return str(st.secrets.get("GEMINI_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))).strip()
+    return str(st.secrets.get("GEMINI_MODEL", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))).strip()
+
+
+def model_candidates(client: genai.Client) -> list[str]:
+    """Discover models available to this particular API key before making a call.
+
+    Gemini's available models differ by API key, country, account type, and time.
+    Hard-coding a retired model is therefore fragile. The configured model remains
+    the first choice, but the API's own model list supplies the fallbacks.
+    """
+    configured = resolve_model_name().removeprefix("models/")
+    discovered = []
+    try:
+        for model in client.models.list():
+            actions = getattr(model, "supported_actions", []) or []
+            name = str(getattr(model, "name", "")).removeprefix("models/")
+            if name and "generateContent" in actions:
+                discovered.append(name)
+    except Exception:
+        # A configured model can still work if the models endpoint is temporarily unavailable.
+        pass
+
+    # Prefer general-purpose Flash models. They are suitable for product image
+    # understanding and normally lower cost than Pro or image-generation models.
+    def preference(name: str) -> tuple[int, int, str]:
+        lower = name.lower()
+        return (
+            0 if "flash" in lower else 1,
+            1 if "image" in lower or "tts" in lower or "live" in lower else 0,
+            lower,
+        )
+
+    return list(dict.fromkeys([configured, *sorted(discovered, key=preference)]))
 
 
 def generate_card_copy(api_key: str, image: PILImage.Image) -> dict:
     """Call the current Google Gen AI SDK and retry only temporary failures."""
     client = genai.Client(api_key=api_key)
-    model_names = [resolve_model_name(), "gemini-2.5-flash-lite", "gemini-2.0-flash"]
-    unique_models = list(dict.fromkeys(name for name in model_names if name))
+    unique_models = model_candidates(client)
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=CARD_SCHEMA,
@@ -143,7 +174,9 @@ def generate_card_copy(api_key: str, image: PILImage.Image) -> dict:
             except Exception as error:  # The SDK error class varies by installed SDK version.
                 last_error = error
                 message = str(error).lower()
-                is_model_error = "not found" in message or "not supported" in message or "404" in message
+                is_model_error = any(word in message for word in (
+                    "not found", "not supported", "404", "invalid argument", "400",
+                ))
                 is_temporary = any(word in message for word in ("429", "resource exhausted", "500", "503", "timeout"))
                 if is_temporary and attempt < 2:
                     time.sleep(2 ** attempt)
@@ -153,9 +186,9 @@ def generate_card_copy(api_key: str, image: PILImage.Image) -> dict:
                 raise
 
     raise RuntimeError(
-        "No configured Gemini model was available for this API key. "
-        "Set GEMINI_MODEL in Streamlit Secrets to a vision-capable model shown in Google AI Studio. "
-        f"Last API message: {last_error}"
+        "Gemini did not accept any image-capable model available to this API key. "
+        "Check that the key is an active Gemini API key from Google AI Studio. "
+        f"Models tried: {', '.join(unique_models[:8])}. Last API message: {last_error}"
     )
 
 
